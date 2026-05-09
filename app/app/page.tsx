@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useFocus } from "@/components/shared/focus-toggle";
 import { Eye, EyeOff, Plus, Command } from "lucide-react";
@@ -24,6 +24,33 @@ export default function AppScreen() {
   const [timeSaved, setTimeSaved] = useState(0);
   const [contextSwitches, setContextSwitches] = useState(0);
 
+  // Store for live intents from Slack
+  const [liveIntents, setLiveIntents] = useState<any[]>([]);
+
+  // Poll for live Slack intents every 3 seconds
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/intents/pending");
+        const data = await res.json();
+        if (data.intents?.length > 0) {
+          setLiveIntents(data.intents);
+        }
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // All intents = live + mock
+  const allIntents = [...liveIntents, ...MOCK_INTENTS];
+
+  // Get full intent data by id (live or mock)
+  function getIntentById(id: string) {
+    return allIntents.find((i) => i.id === id) || null;
+  }
+
   async function handleApprove() {
     if (!activeTaskId) return;
     setExecutionStatus("executing");
@@ -36,9 +63,7 @@ export default function AppScreen() {
       });
       const result = await res.json();
       if (!result.success) throw new Error();
-    } catch {
-      // Still show success in UI — real execution errors would be handled per-action
-    }
+    } catch {}
 
     setLastExecutedId(activeTaskId);
     setLastActions(currentActions.map((a) => `${a.app} · ${a.action}`));
@@ -72,13 +97,14 @@ export default function AppScreen() {
     setActiveTaskId(id);
   }
 
-  // Called by IntentWeaver when AI returns actions
   function handleActionsReady(actions: any[]) {
     setCurrentActions(actions);
-    const mock = MOCK_INTENTS.find((i) => i.id === activeTaskId);
-    setTimeSaved(mock?.simulation.timeSavedMinutes ?? 5);
-    setContextSwitches(mock?.simulation.contextSwitchesAvoided ?? 2);
+    const intent = getIntentById(activeTaskId || "");
+    setTimeSaved(intent?.simulation?.timeSavedMinutes ?? 5);
+    setContextSwitches(intent?.simulation?.contextSwitchesAvoided ?? 2);
   }
+
+  const activeIntent = getIntentById(activeTaskId || "");
 
   return (
     <div className="flex w-full h-full relative">
@@ -93,7 +119,7 @@ export default function AppScreen() {
             <div className="flex items-center gap-1.5 mt-1">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               <span className="text-[10px] text-ghost-highlight">
-                Live · {MOCK_INTENTS.length - completedTasks.length} pending
+                Live · {allIntents.length - completedTasks.length} pending
               </span>
             </div>
           </div>
@@ -103,7 +129,12 @@ export default function AppScreen() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-2">
-          <InboxList activeId={activeTaskId} onSelect={handleSelect} completedTasks={completedTasks} />
+          <InboxList
+            activeId={activeTaskId}
+            onSelect={handleSelect}
+            completedTasks={completedTasks}
+            liveIntents={liveIntents}
+          />
         </div>
 
         <div className="p-3 border-t border-surface-border">
@@ -117,7 +148,6 @@ export default function AppScreen() {
       {/* MAIN */}
       <section className="flex-1 flex flex-col relative is-active overflow-hidden">
 
-        {/* Top bar */}
         <div className="h-11 border-b border-surface-border flex items-center justify-between px-5 shrink-0">
           <div className="flex items-center gap-3">
             {isFocusMode && (
@@ -139,11 +169,9 @@ export default function AppScreen() {
           )}
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-8 md:p-12 lg:p-16 flex flex-col items-center justify-center">
           <AnimatePresence mode="wait">
 
-            {/* Executing */}
             {executionStatus === "executing" && (
               <motion.div key="executing" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-8 text-center">
                 <div className="relative w-14 h-14">
@@ -167,7 +195,6 @@ export default function AppScreen() {
               </motion.div>
             )}
 
-            {/* Post execution */}
             {executionStatus === "success" && (
               <PostExecution
                 key="success"
@@ -180,17 +207,16 @@ export default function AppScreen() {
               />
             )}
 
-            {/* Active task */}
             {(executionStatus === "idle" || executionStatus === "rejected") && activeTaskId && (
               <IntentWeaver
                 key={activeTaskId}
                 taskId={activeTaskId}
+                intentData={activeIntent}
                 executionStatus={executionStatus}
                 onActionsReady={handleActionsReady}
               />
             )}
 
-            {/* Empty state */}
             {(executionStatus === "idle" || executionStatus === "rejected") && !activeTaskId && (
               <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-5 text-center max-w-xs">
                 <div className="w-12 h-12 rounded-xl border border-surface-border flex items-center justify-center">
@@ -198,10 +224,10 @@ export default function AppScreen() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground mb-2">
-                    {completedTasks.length === MOCK_INTENTS.length ? "All caught up 🎉" : "No active intent"}
+                    {completedTasks.length === allIntents.length ? "All caught up 🎉" : "No active intent"}
                   </p>
                   <p className="text-xs text-ghost-highlight leading-relaxed">
-                    {completedTasks.length === MOCK_INTENTS.length
+                    {completedTasks.length === allIntents.length
                       ? "You've cleared the inbox. Nice work."
                       : "Pick a message from the inbox to review its workflow."}
                   </p>
@@ -217,7 +243,6 @@ export default function AppScreen() {
           </AnimatePresence>
         </div>
 
-        {/* Approval bar */}
         <AnimatePresence>
           {activeTaskId && executionStatus === "idle" && (
             <ApprovalBar onApprove={handleApprove} onReject={handleReject} />

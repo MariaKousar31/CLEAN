@@ -1,6 +1,7 @@
 {
   "/app/page": "app/app/page.js",
   "/api/intent/route": "app/api/intent/route.js",
-  "/page": "app/page.js",
+  "/api/intents/pending/route": "app/api/intents/pending/route.js",
+  "/api/webhooks/slack/route": "app/api/webhooks/slack/route.js",
   "/api/execute/route": "app/api/execute/route.js"
 }
